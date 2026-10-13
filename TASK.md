@@ -35,9 +35,14 @@ Dual-Use / Ethical Considerations" appendix.
 ## Open
 
 - [ ] **Run the real system (300 rounds) on several models of different capability.**
-  1. Choose the models before running, spanning a range of capability, size and price (list candidates with the
-     snippet in CLAUDE.md, "Choose a model"). Record the chosen models and their prices here. Do not drop a model
-     after seeing its results.
+  1. Models:
+
+     | # | model | tier |
+     |---|---|---|
+     | 1 | `meta-llama/llama-3.1-8b-instruct` | 8B, small open |
+     | 2 | `openai/gpt-4o-mini` | small closed |
+     | 3 | `meta-llama/llama-3.3-70b-instruct` | 70B, mid-size open |
+     | 4 | `qwen/qwen3-235b-a22b-2507` | 235B mixture of experts (22B active), large open |
   2. For each model: copy `configs/pilot.toml`, set a new `name` and the `model`, run `plan`, get approval, then
      `run --config <file> --yes`. One config holds one model.
   3. Compare the per-model reports (`runs/<name>/report/`) side by side. Report every model that was run.
