@@ -235,12 +235,9 @@ currently use the price index only.
 - Seeds are best effort: OpenRouter's `seed` depends on the model and provider.
 - Commits: end messages with the `Co-Authored-By` trailer for the model that helped. Do not commit `runs/`.
 
-## 7. State of the project and open items
+## 7. Project state
 
-- Done: harness, dry-run validation, 16 tests, smoke tests on two models (about $0.008 spent), public repo.
-- Open: make the `collusive` flag use the profit index too (see section 5); run the 300-round pilot per model;
-  decide the pilot model; extend to the sprint's ablations (history length, scratchpad on/off, seller naming,
-  temperature).
+- Project status, the research task and the open to-do list are in `TASK.md`. Keep it updated as work finishes.
 - Sprint facts: tracks are Markets, Detection and Audit, Carriers and Countermeasures. Deliverable is a 4 to 8 page
   PDF report on the official template, an abstract of 150 words or fewer, and a required "Limitations and Dual-Use /
   Ethical Considerations" appendix. Judging is Impact and Innovation, Execution Quality, and Presentation and
