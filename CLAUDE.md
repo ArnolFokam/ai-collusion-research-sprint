@@ -6,33 +6,6 @@ arXiv:2404.00806, which builds on Calvano et al. 2020). Any model on OpenRouter 
 
 This file lets you do the usual tasks without reading the code. Read the code only when a task needs a change.
 
-## 0. Preliminary: set up the environment (do this first)
-
-Prerequisites: Python 3.11+ and [uv](https://docs.astral.sh/uv/) (`curl -LsSf https://astral.sh/uv/install.sh | sh`).
-
-```bash
-uv sync                      # installs everything into .venv
-cp .env.example .env         # then put your OpenRouter key in .env (https://openrouter.ai/keys)
-uv run pytest -q             # 13 tests, no network, no key needed. Must pass before anything else.
-uv run python -m harness run --config configs/dry.toml   # free end-to-end check with scripted agents
-```
-
-The key goes in `.env` as `OPEN_ROUTER_API_KEY=...` (`OPENROUTER_API_KEY` also works). `.env` wins over the shell
-environment. Verify the key and see remaining budget (free, spends no tokens, never prints the key):
-
-```bash
-uv run python - <<'PY'
-import json, urllib.request
-from harness.agent import load_api_key
-key, source = load_api_key()
-d = json.load(urllib.request.urlopen(urllib.request.Request(
-    "https://openrouter.ai/api/v1/auth/key", headers={"Authorization": f"Bearer {key}"}), timeout=20))["data"]
-print("key source:", source, "| limit:", d.get("limit"), "| remaining:", d.get("limit_remaining"), "| used:", d.get("usage"))
-PY
-```
-
-If setup is healthy: tests pass, the dry run prints `report: runs/dry/report`, and the key check shows a source and a limit.
-
 ## 1. Architecture
 
 ```mermaid
@@ -92,7 +65,54 @@ Files:
 | `harness/report.py` | aggregates runs: summary table, Wilson intervals, plots |
 | `tests/` | market benchmarks, prompt parity fixtures, pipeline tests against a mock OpenRouter server |
 
-## 2. What a run saves: `runs/<config name>/<condition>/run_NNN/`
+## 2. Set up the environment (do this before anything else)
+
+### Stack
+
+| layer | choice |
+|---|---|
+| Language | Python 3.11+ (developed on 3.12) |
+| Environment and dependencies | [uv](https://docs.astral.sh/uv/): `pyproject.toml` + `uv.lock`, environment in `.venv` |
+| LLM access | [OpenRouter](https://openrouter.ai) (OpenAI-compatible API) through the `openai` SDK (`AsyncOpenAI`) |
+| Validation of model output | `pydantic` v2 |
+| Market math | `numpy`, `scipy` (Nash and monopoly benchmarks by optimisation) |
+| Data handling | `polars` (trajectories, summaries); JSON, JSONL and gzip files on disk |
+| Plots | `matplotlib` (headless, PNG) |
+| Config | TOML files read with the standard library (`tomllib`) |
+| Concurrency | `asyncio` inside a run (both firms price at once); one subprocess per run |
+| Tests | `pytest`, including a mock OpenRouter server, so no network or key is needed |
+| Accounts | an OpenRouter account with credit and an API key |
+
+Exact versions are pinned in `uv.lock`. Always run Python through `uv run`, which uses the project's `.venv`.
+
+### Steps
+
+Prerequisites: Python 3.11+ and uv (`curl -LsSf https://astral.sh/uv/install.sh | sh`).
+
+```bash
+uv sync                      # installs everything into .venv
+cp .env.example .env         # then put your OpenRouter key in .env (https://openrouter.ai/keys)
+uv run pytest -q             # 13 tests, no network, no key needed. Must pass before anything else.
+uv run python -m harness run --config configs/dry.toml   # free end-to-end check with scripted agents
+```
+
+The key goes in `.env` as `OPEN_ROUTER_API_KEY=...` (`OPENROUTER_API_KEY` also works). `.env` wins over the shell
+environment. Verify the key and see remaining budget (free, spends no tokens, never prints the key):
+
+```bash
+uv run python - <<'PY'
+import json, urllib.request
+from harness.agent import load_api_key
+key, source = load_api_key()
+d = json.load(urllib.request.urlopen(urllib.request.Request(
+    "https://openrouter.ai/api/v1/auth/key", headers={"Authorization": f"Bearer {key}"}), timeout=20))["data"]
+print("key source:", source, "| limit:", d.get("limit"), "| remaining:", d.get("limit_remaining"), "| used:", d.get("usage"))
+PY
+```
+
+If setup is healthy: tests pass, the dry run prints `report: runs/dry/report`, and the key check shows a source and a limit.
+
+## 3. What a run saves: `runs/<config name>/<condition>/run_NNN/`
 
 | file | contents |
 |---|---|
@@ -106,7 +126,7 @@ Files:
 `runs/<name>/report/` has `summary.csv`, `summary.json`, `outcomes.png`, `trajectories.png`, `rates.png`.
 `runs/` is gitignored.
 
-## 3. Playbooks for the usual tasks
+## 4. Playbooks for the usual tasks
 
 Spend rule: anything that calls the API costs money. Dry runs and tests are free. State the estimated cost
 and get the user's go-ahead before running more than a smoke test.
@@ -181,7 +201,7 @@ for e in read("runs/<name>/<condition>/run_000/transcript.jsonl.gz"):
 Run `uv run pytest` afterwards. `tests/fixtures/prompt_round*.txt` were generated from the original repo's prompt
 code, so a failing prompt test means the prompt changed; update the fixtures only if that is deliberate.
 
-## 4. Metrics and how to read them
+## 5. Metrics and how to read them
 
 Per round: `price_index = (price - Nash) / (monopoly - Nash)` averaged over firms, and `profit_index` the same on
 total profits. 0 is competitive, 1 is a full cartel. A run's outcome is the mean over the last `final_window` rounds.
@@ -190,7 +210,7 @@ Caution: price alone can mislead. A model that overprices from anchoring shows a
 index is negative, and would be wrongly labelled collusive. Always read both. The `collusive` flags in `metrics.json`
 currently use the price index only.
 
-## 5. Conventions and gotchas
+## 6. Conventions and gotchas
 
 - Never print, log or commit the API key. `.env` is gitignored. The repo is **public**: scan for secrets before
   every push (for example, grep the staged files for the key value and for `sk-or-`).
@@ -203,10 +223,10 @@ currently use the price index only.
 - Seeds are best effort: OpenRouter's `seed` depends on the model and provider.
 - Commits: end messages with the `Co-Authored-By` trailer for the model that helped. Do not commit `runs/`.
 
-## 6. State of the project and open items
+## 7. State of the project and open items
 
 - Done: harness, dry-run validation, 13 tests, smoke tests on two models (about $0.008 spent), public repo.
-- Open: make the `collusive` flag use the profit index too (see section 4); run the 300-round pilot per model;
+- Open: make the `collusive` flag use the profit index too (see section 5); run the 300-round pilot per model;
   decide the pilot model; extend to the sprint's ablations (history length, scratchpad on/off, seller naming,
   temperature).
 - Sprint facts: tracks are Markets, Detection and Audit, Carriers and Countermeasures. Deliverable is a 4 to 8 page
