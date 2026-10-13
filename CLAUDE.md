@@ -10,21 +10,13 @@ This file lets you do the usual tasks without reading the code. Read the code on
 
 ```mermaid
 flowchart LR
-    CFG["configs/*.toml<br/>model + grid of conditions"] --> CLI["python -m harness<br/>run | report"]
-    CLI --> RUNALL["runner.run_all<br/>skips finished runs<br/>1 subprocess per run"]
-    RUNALL --> ONE["runner.run_one"]
-    ONE --> SIM["sim.simulate<br/>round loop"]
-    SIM --> PROMPT["prompts.build_prompt<br/>history, plans, insights"]
-    SIM --> AGENT["agent.py<br/>OpenRouterAgent<br/>ScriptedAgent for dry runs"]
-    AGENT <-->|"chat.completions"| API[("OpenRouter API")]
-    SIM --> MARKET["market.Market<br/>logit demand, profits,<br/>Nash and monopoly prices"]
-    AGENT -.->|every attempt| TR["transcript.jsonl.gz"]
-    SIM -.-> RJ["rounds.jsonl"]
-    ONE --> MET["metrics.py<br/>price and profit index"]
-    MET --> MJ["metrics.json<br/>trajectory.csv"]
-    CLI --> REP["report.py"]
-    MJ --> REP
-    REP --> OUT["summary.csv<br/>3 PNG plots"]
+    CFG["Config (TOML)<br/>model + conditions"] --> RUN["Runner<br/>one process per run"]
+    RUN --> SIM["Round loop"]
+    SIM --> AGENT["Agents<br/>LLM or scripted"]
+    AGENT <-->|"prompt / JSON price"| API[("OpenRouter")]
+    SIM --> MARKET["Market<br/>demand, profits,<br/>Nash and monopoly"]
+    SIM --> FILES["Run files<br/>transcript, rounds, metrics"]
+    FILES --> REPORT["Report<br/>table and plots"]
 ```
 
 One round of the game:
@@ -60,6 +52,7 @@ Files:
 | `harness/market.py` | `Market`: logit demand, profits, Nash by best-response iteration, monopoly by optimisation |
 | `harness/prompts.py` | prompt prefixes P1/P2, `GENERAL_PROMPT`, `build_prompt`, `market_data_line` |
 | `harness/agent.py` | `OpenRouterAgent`, `ScriptedAgent`, `PricingAnswer`, `load_api_key` |
+| `harness/plan.py` | `plan` command: run, call and cost estimate; `run` refuses large real configs without `--yes` |
 | `harness/transcript.py` | gzip JSONL writer/reader for every API call |
 | `harness/metrics.py` | per-run price and profit indices from saved files (no API) |
 | `harness/report.py` | aggregates runs: summary table, Wilson intervals, plots |
@@ -92,7 +85,7 @@ Prerequisites: Python 3.11+ and uv (`curl -LsSf https://astral.sh/uv/install.sh 
 ```bash
 uv sync                      # installs everything into .venv
 cp .env.example .env         # then put your OpenRouter key in .env (https://openrouter.ai/keys)
-uv run pytest -q             # 13 tests, no network, no key needed. Must pass before anything else.
+uv run pytest -q             # 16 tests, no network, no key needed. Must pass before anything else.
 uv run python -m harness run --config configs/dry.toml   # free end-to-end check with scripted agents
 ```
 
@@ -128,10 +121,12 @@ If setup is healthy: tests pass, the dry run prints `report: runs/dry/report`, a
 
 ## 4. Playbooks for the usual tasks
 
-Spend rule: anything that calls the API costs money. Dry runs and tests are free. State the estimated cost
-and get the user's go-ahead before running more than a smoke test.
+Spend rule: anything that calls the API costs money. Dry runs and tests are free. Run `plan`, show the user the
+estimated cost, and get their go-ahead before passing `--yes` to a real run.
 
 ### Run the free end-to-end check
+Three configs cover the three levels of cost: `dry.toml` (scripted agents, free), `smoke.toml` (real calls, about a
+cent), `pilot.toml` (the actual run, about $3; needs `--yes`).
 `uv run python -m harness run --config configs/dry.toml`. Scripted agents sit at Nash, halfway, and monopoly,
 so the final price index must come out about 0, 0.5 and 1. If not, the metrics or market code is broken.
 
@@ -154,7 +149,8 @@ Tradeoff: the cheapest models are noisy. Fish et al. chose their model on a mono
 non-reasoning chat models close to GPT-4-class behaviour; check the first outputs before scaling up.
 
 ### Smoke test a model (1 run, 10 rounds, 20 calls, about a cent)
-Copy `configs/smoke.toml`, set `name` and `model`, then `uv run python -m harness run --config <file>`.
+`configs/smoke.toml` (currently llama-3.1-8b). To try another model, change `model` and `name` there (or copy it),
+then `uv run python -m harness run --config configs/smoke.toml`.
 Check `runs/<name>/.../stdout.txt` for warnings, `metrics.json` for `usage` (tokens, retries), and read a few
 transcript entries. Reference results (10 rounds, P1, alpha 1):
 
@@ -166,13 +162,29 @@ transcript entries. Reference results (10 rounds, P1, alpha 1):
 Both overpriced far above the monopoly price (1.93): they anchor on the willingness-to-pay cap (4.51) in the prompt
 and lose money. That is not collusion. Ten rounds is too short to see convergence.
 
-### Run the pilot (P1 vs P2)
-Edit `configs/p1_vs_p2.toml` (`model` is empty on purpose, and `n_runs`), then
-`uv run python -m harness run --config configs/p1_vs_p2.toml`. It prints the number of runs and API calls first.
-Cost per full run (300 rounds, about 600 calls) is roughly $0.10 on llama-3.1-8b and $0.35 on gpt-4o-mini; these are
-extrapolations, so read the real token usage in `metrics.json`. A run takes 25 to 40 minutes; `parallel` runs execute at once.
+### Run the pilot (P1 vs P2, 300 rounds)
+`configs/pilot.toml` is the actual run: 300 rounds, P1 and P2, 3 runs each, on `openai/gpt-4o-mini`. Change `model`
+(and `name`, so results do not mix) or `n_runs` as needed, then
+`uv run python -m harness plan --config configs/pilot.toml` (check cost), then, once approved,
+`uv run python -m harness run --config configs/pilot.toml --yes`.
+Cost per full run (300 rounds, about 600 calls) is roughly $0.15 on llama-3.1-8b and $0.50 on gpt-4o-mini (from the
+`plan` token model); read the real token usage in `metrics.json` afterwards. A run takes 25 to 40 minutes; `parallel` runs execute at once.
 Rerunning the same command resumes: finished runs are skipped. If runs fail, see `stdout.txt` in the run directory.
 For HTTP 429 errors, lower `parallel`.
+
+### See what a run would cost, without running it
+`uv run python -m harness plan --config configs/<name>.toml` prints the number of runs, API calls, estimated tokens
+and estimated cost, and starts nothing. The estimate uses a token model measured on gpt-4o-mini
+(prompt tokens ~ 629 + 48 per round of history, ~276 completion tokens per call) and live OpenRouter prices; treat it
+as +-30%, and less accurate for models that tokenise differently. It matched the smoke tests within about 5%.
+
+**Never run `harness run` just to test a config**: it launches real runs immediately. `run` now refuses real
+configs of more than 100 API calls unless you pass `--yes`, so only add `--yes` after the user has approved the
+`plan` numbers. Dry runs and smoke-sized runs need no flag.
+
+If a real run is started by mistake, stop it with `pkill -f "[h]arness one"` (the brackets stop the pattern matching
+its own shell); killing only the parent leaves the child run processes going. Partial runs have no `metrics.json`,
+so they restart from scratch.
 
 ### Rebuild the report without spending anything
 `uv run python -m harness report --config configs/<name>.toml`
@@ -225,7 +237,7 @@ currently use the price index only.
 
 ## 7. State of the project and open items
 
-- Done: harness, dry-run validation, 13 tests, smoke tests on two models (about $0.008 spent), public repo.
+- Done: harness, dry-run validation, 16 tests, smoke tests on two models (about $0.008 spent), public repo.
 - Open: make the `collusive` flag use the profit index too (see section 5); run the 300-round pilot per model;
   decide the pilot model; extend to the sprint's ablations (history length, scratchpad on/off, seller naming,
   temperature).

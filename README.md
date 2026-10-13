@@ -11,22 +11,32 @@ price history and their own notes, and cannot communicate. Any model on [OpenRou
 
 ```mermaid
 flowchart LR
-    CFG["configs/*.toml<br/>model + grid of conditions"] --> CLI["python -m harness<br/>run | report"]
-    CLI --> RUNALL["runner.run_all<br/>skips finished runs<br/>1 subprocess per run"]
-    RUNALL --> ONE["runner.run_one"]
-    ONE --> SIM["sim.simulate<br/>round loop"]
-    SIM --> PROMPT["prompts.build_prompt<br/>history, plans, insights"]
-    SIM --> AGENT["agent.py<br/>OpenRouterAgent<br/>ScriptedAgent for dry runs"]
-    AGENT <-->|"chat.completions"| API[("OpenRouter API")]
-    SIM --> MARKET["market.Market<br/>logit demand, profits,<br/>Nash and monopoly prices"]
-    AGENT -.->|every attempt| TR["transcript.jsonl.gz"]
-    SIM -.-> RJ["rounds.jsonl"]
-    ONE --> MET["metrics.py<br/>price and profit index"]
-    MET --> MJ["metrics.json<br/>trajectory.csv"]
-    CLI --> REP["report.py"]
-    MJ --> REP
-    REP --> OUT["summary.csv<br/>3 PNG plots"]
+    CFG["Config (TOML)<br/>model + conditions"] --> RUN["Runner<br/>one process per run"]
+    RUN --> SIM["Round loop"]
+    SIM --> AGENT["Agents<br/>LLM or scripted"]
+    AGENT <-->|"prompt / JSON price"| API[("OpenRouter")]
+    SIM --> MARKET["Market<br/>demand, profits,<br/>Nash and monopoly"]
+    SIM --> FILES["Run files<br/>transcript, rounds, metrics"]
+    FILES --> REPORT["Report<br/>table and plots"]
 ```
+
+How it fits together:
+
+- **Config:** a TOML file names the model and a grid of conditions (prompt, alpha, memory length, temperature)
+  plus the number of runs per condition.
+- **CLI:** `python -m harness run` expands the grid into runs, skips any that already finished, and starts
+  each remaining run in its own subprocess, a few at a time. `report` rebuilds the summary and plots from saved files.
+- **One run:** `run_one` builds two firms, a market, and an agent per firm, then plays a fixed number of rounds.
+- **Each round:** both firms get a prompt built from their own history (recent market outcomes plus the plans and
+  insights they wrote last round) and price at the same time. They never see each other's reasoning, only prices.
+- **Market:** takes the two prices and returns quantities and profits from a logit demand model. It also provides the two
+  reference points everything is measured against: the competitive (Nash) price and the joint-monopoly price.
+- **Agents:** an OpenRouter agent sends the prompt to the chosen model and validates the JSON reply, retrying on failure.
+  A scripted agent posts fixed prices and makes no API calls, for free dry runs and metric checks.
+- **Saved files:** every API call goes to the transcript, each round's outcome and the agents' notes go to
+  `rounds.jsonl`, and a run's summary goes to `metrics.json`, which is written last.
+- **Metrics and report:** metrics turn the saved prices and profits into indices (0 = Nash, 1 = monopoly), and the report
+  aggregates runs into a summary table and three plots. Both read only saved files, so they never need the API.
 
 See [CLAUDE.md](CLAUDE.md) for the per-round sequence diagram and step-by-step playbooks (written so a coding
 assistant can run the usual tasks without exploring the code).
@@ -40,14 +50,16 @@ with an API key.
 ```bash
 uv sync
 cp .env.example .env        # then put your OpenRouter key in .env
-uv run pytest               # 13 tests, no network or API key needed
+uv run pytest               # 16 tests, no network or API key needed
 ```
 
 ## Run
 
 ```bash
 uv run python -m harness run --config configs/dry.toml     # free: scripted agents at known prices
-uv run python -m harness run --config configs/smoke.toml   # 20 real calls, a fraction of a cent
+uv run python -m harness run --config configs/smoke.toml   # cheap: 20 real calls, a fraction of a cent
+uv run python -m harness plan --config configs/pilot.toml  # size and estimated cost; runs nothing
+uv run python -m harness run --config configs/pilot.toml --yes  # the actual run: 300 rounds, P1 vs P2, ~$3
 uv run python -m harness report --config configs/smoke.toml  # rebuild summary + plots from saved runs
 ```
 
@@ -79,7 +91,7 @@ harness/market.py    demand, profits, Nash and monopoly benchmarks
 harness/prompts.py   prompts and prompt construction
 harness/agent.py     OpenRouter agent and scripted agent
 harness/sim.py       the repeated game
-harness/transcript.py, metrics.py, report.py, runner.py, config.py
+harness/plan.py, transcript.py, metrics.py, report.py, runner.py, config.py
 ```
 
 ## Attribution

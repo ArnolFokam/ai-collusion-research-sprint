@@ -9,8 +9,8 @@ from harness.runner import run_one
 
 
 def _cfg(tmp_path, **kw):
-    kw = {"n_rounds": 12, "final_window": 6} | kw
-    return Config(name="t", out_dir=str(tmp_path), n_runs=1, **kw)
+    kw = {"n_rounds": 12, "final_window": 6, "n_runs": 1} | kw
+    return Config(name="t", out_dir=str(tmp_path), **kw)
 
 
 @pytest.mark.parametrize("scenario,expected", [("NASH", 0.0), ("HALF", 0.5), ("MONO", 1.0)])
@@ -98,3 +98,45 @@ def test_api_key_loading(tmp_path, monkeypatch):
     assert load_api_key(env) == ("from-shell", "environment:OPENROUTER_API_KEY")
     env.write_text('# comment\nexport OPEN_ROUTER_API_KEY="from-dotenv"\n')
     assert load_api_key(env) == ("from-dotenv", ".env:OPEN_ROUTER_API_KEY")   # .env wins, both spellings work
+
+
+def test_plan_estimates_and_dry_is_free(tmp_path):
+    from harness.plan import make_plan
+    dry = make_plan(_cfg(tmp_path, dry_run=True, prompts=["NASH"]), fetch_prices=False)
+    assert dry["api_calls"] == 0 and dry["est_cost_usd"] == 0.0
+    real = make_plan(_cfg(tmp_path, model="m", prompts=["P1", "P2"], n_rounds=300, n_runs=3), fetch_prices=False)
+    assert real["api_calls"] == 2 * 3 * 300 * 2 and real["runs_to_do"] == 6
+    short = make_plan(_cfg(tmp_path, model="m", prompts=["P1"], n_rounds=300, memory_lengths=[10]), fetch_prices=False)
+    assert short["est_input_tokens"] < real["est_input_tokens"] / 6      # shorter memory -> smaller prompts
+
+
+def _run_cli(monkeypatch, tmp_path, argv, **cfg_kw):
+    import sys, tomllib
+    import harness.runner, harness.__main__ as cli
+    cfg_path = tmp_path / "c.toml"
+    lines = [f'name = "t"', f'out_dir = "{tmp_path}"'] + [
+        f"{k} = {v!r}".replace("True", "true").replace("False", "false").replace("'", '"') for k, v in cfg_kw.items()]
+    cfg_path.write_text("\n".join(lines))
+    started = []
+    async def fake_run_all(cfg, path): started.append(path)
+    monkeypatch.setattr(harness.runner, "run_all", fake_run_all)
+    monkeypatch.setattr(sys, "argv", ["harness", *argv, "--config", str(cfg_path)])
+    try:
+        cli.main()
+        return started, None
+    except SystemExit as e:
+        return started, e.code
+
+
+def test_real_run_requires_yes(monkeypatch, tmp_path):
+    started, code = _run_cli(monkeypatch, tmp_path, ["run", "--no-report"], model="m", n_runs=3, n_rounds=300)
+    assert started == [] and "Nothing was started" in str(code)          # refused, nothing launched
+    started, code = _run_cli(monkeypatch, tmp_path, ["run", "--no-report", "--yes"], model="m", n_runs=3, n_rounds=300)
+    assert len(started) == 1
+
+
+def test_dry_and_tiny_runs_need_no_confirmation(monkeypatch, tmp_path):
+    started, _ = _run_cli(monkeypatch, tmp_path, ["run", "--no-report"], dry_run=True, prompts=["NASH"])
+    assert len(started) == 1
+    started, _ = _run_cli(monkeypatch, tmp_path, ["run", "--no-report"], model="m", prompts=["P1"], n_runs=1, n_rounds=10)
+    assert len(started) == 1                                              # 20 calls: smoke-sized
