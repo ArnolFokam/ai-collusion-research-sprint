@@ -1,0 +1,8 @@
+# Plumbing check: 1 run, 10 rounds (20 calls). Costs a fraction of a cent.
+name = "smoke_4omini"
+model = "openai/gpt-4o-mini"
+prompts = ["P1"]
+n_runs = 1
+n_rounds = 10
+final_window = 5
+parallel = 1

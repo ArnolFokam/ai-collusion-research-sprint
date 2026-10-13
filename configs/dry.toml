@@ -1,0 +1,9 @@
+# Scripted FakeAgents at known points on the Nash -> monopoly line. No API calls.
+# Expected final price index: NASH ~ 0, HALF ~ 0.5, MONO ~ 1.
+name = "dry"
+dry_run = true
+prompts = ["NASH", "HALF", "MONO"]
+n_runs = 2
+n_rounds = 60
+final_window = 20
+parallel = 3

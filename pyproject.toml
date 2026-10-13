@@ -1,0 +1,22 @@
+[project]
+name = "collusion-harness"
+version = "0.1.0"
+description = "Harness to measure collusive-like pricing by LLM agents (Fish et al. setup) via OpenRouter"
+requires-python = ">=3.11"
+dependencies = [
+    "numpy",
+    "scipy",
+    "polars",
+    "pydantic>=2",
+    "openai>=1.86",
+    "matplotlib",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=9.1.1",
+]
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
+testpaths = ["tests"]
