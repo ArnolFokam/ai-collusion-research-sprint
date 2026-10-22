@@ -1,0 +1,15 @@
+# THE ACTUAL RUN: full 300-round games, P1 vs P2 prompts. Spends real money.
+#   uv run python -m harness run --config configs/pilot_llama4maverick.toml --yes
+# Size: 2 prompts x n_runs x 300 rounds x 2 firms = 600 calls per run, 3,600 calls at n_runs = 3.
+# Check size and estimated cost first:  uv run python -m harness plan --config configs/pilot_llama4maverick.toml
+# (about $0.50 per run on gpt-4o-mini, ~$3 here). `run` refuses to start without --yes.
+# Each run takes ~25 minutes; `parallel` runs go at once. Finished runs are skipped on rerun.
+# To use another model change `model` only (and `name`, so results do not mix).
+name = "pilot_llama4maverick"
+model = "meta-llama/llama-4-maverick"
+prompts = ["P1", "P2"]
+alphas = [1.0]
+n_runs = 10
+n_rounds = 300
+parallel = 6
+seed = 0
